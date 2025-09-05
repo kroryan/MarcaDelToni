@@ -1,0 +1,4 @@
+pyinstaller>=6.0.0
+tkinter
+pyinput>=1.7.6
+pywin32==306
