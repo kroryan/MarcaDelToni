@@ -5,15 +5,18 @@ Sin dependencias complicadas
 """
 
 import tkinter as tk
-from tkinter import font, messagebox, simpledialog
+from tkinter import font, messagebox, simpledialog, filedialog
 import threading
 import time
 import sys
+import json
+import os
+from datetime import datetime
 
 class MarcaDeAguaVisible:
     def __init__(self):
         # === CONFIGURACIÓN ===
-        self.text = "🌟 OPERATE ENSERIO, COMO PUEDE SER¡¡¡  🌟"
+        self.text = ""  # Comenzar sin texto por defecto
         self.font_size = 64
         self.text_color = "#FFD700"  # Oro brillante
         self.bg_color = "#000080"    # Azul oscuro
@@ -33,6 +36,14 @@ class MarcaDeAguaVisible:
         self.current_text_index = 0
         self.labels = []  # Lista de labels para múltiples textos
         
+        # Sistema de perfiles
+        self.profiles_dir = "perfiles_marca_agua"
+        self.current_profile = "default"
+        self.ensure_profiles_directory()
+        
+        # Cargar perfil por defecto si existe
+        self.load_profile("default")
+        
         # Crear la ventana principal
         self.root = tk.Tk()
         self.setup_window()
@@ -46,8 +57,12 @@ class MarcaDeAguaVisible:
         print("   • Botón 'Parpadeo': Activar/desactivar parpadeo")
         print("   • Botón 'Modo Mover': Activar movimiento individual de textos")
         print("   • Botón 'Añadir Texto': Agregar textos adicionales")
-        print("   • Botón 'Quitar Texto': Eliminar textos")
+        print("   • Botón 'Quitar Texto': Eliminar textos (incluso el principal)")
         print("   • Botón 'Lista Textos': Ver todos los textos activos")
+        print("   • Botón 'Guardar Perfil': Guardar configuración actual")
+        print("   • Botón 'Cargar Perfil': Cargar configuración guardada")
+        print("   • Botón 'Lista Perfiles': Ver perfiles disponibles")
+        print("   • Botón 'Borrar Perfil': Eliminar perfil guardado")
         print("   • Botón 'Cerrar': Salir")
         print("   • Clic y arrastrar: Mover la ventana")
         print("   • Doble clic en texto: Editar texto individual")
@@ -305,7 +320,11 @@ class MarcaDeAguaVisible:
             ("➕  Añadir Texto", self.add_new_text),
             ("🗑️  Quitar Texto", self.remove_text),
             ("📋  Lista Textos", self.show_texts_list),
-            ("🔄  Resetear", self.reset_settings),
+            ("�  Guardar Perfil", self.save_profile),
+            ("📂  Cargar Perfil", self.load_profile_dialog),
+            ("📋  Lista Perfiles", self.show_profiles_list),
+            ("🗑️  Borrar Perfil", self.delete_profile_dialog),
+            ("�🔄  Resetear", self.reset_settings),
             ("❌  Cerrar", self.quit_app)
         ]
         
@@ -480,9 +499,9 @@ class MarcaDeAguaVisible:
             print(f"📊 Total de textos: {len(self.texts)}")
     
     def remove_text(self):
-        """Quitar un texto (excepto el principal)"""
-        if len(self.labels) <= 1:
-            print("❌ No se puede eliminar el texto principal")
+        """Quitar un texto (incluyendo el principal)"""
+        if len(self.labels) == 0:
+            print("❌ No hay textos para eliminar")
             return
         
         from tkinter import simpledialog, messagebox
@@ -491,27 +510,53 @@ class MarcaDeAguaVisible:
         text_list = []
         for i, text in enumerate(self.texts):
             preview = text[:30] + "..." if len(text) > 30 else text
-            text_list.append(f"{i+1}. {preview}")
+            status = " (Principal)" if i == 0 else ""
+            text_list.append(f"{i+1}. {preview}{status}")
         
         selection = simpledialog.askstring(
             "Quitar Texto",
             f"Textos disponibles:\n" + "\n".join(text_list) + "\n\n" +
-            "Ingresa el número del texto a eliminar (No se puede eliminar el 1):"
+            "Ingresa el número del texto a eliminar:"
         )
         
         try:
             index = int(selection) - 1
-            if index == 0:
-                messagebox.showwarning("Error", "No se puede eliminar el texto principal")
-                return
-            if 0 < index < len(self.labels):
-                # Eliminar label
-                self.labels[index].destroy()
-                self.labels.pop(index)
-                # Eliminar de la lista de textos
-                removed_text = self.texts.pop(index)
-                print(f"🗑️ Texto eliminado: {removed_text}")
-                print(f"📊 Total de textos: {len(self.texts)}")
+            if 0 <= index < len(self.labels):
+                # Si es el último texto, añadir un texto vacío para evitar errores
+                if len(self.labels) == 1:
+                    # Confirmar eliminación del último texto
+                    confirm = messagebox.askyesno(
+                        "Confirmar",
+                        "¿Eliminar el último texto? Se creará un texto vacío automáticamente."
+                    )
+                    if not confirm:
+                        return
+                    
+                    # Eliminar el texto actual
+                    self.labels[index].destroy()
+                    self.labels.pop(index)
+                    removed_text = self.texts.pop(index)
+                    
+                    # Crear un nuevo texto vacío
+                    self.text = ""
+                    self.texts = [""]
+                    self.create_text_label("", 0)
+                    
+                    print(f"🗑️ Texto eliminado: {removed_text}")
+                    print("📝 Texto vacío creado automáticamente")
+                else:
+                    # Eliminar texto normalmente
+                    self.labels[index].destroy()
+                    self.labels.pop(index)
+                    removed_text = self.texts.pop(index)
+                    
+                    # Si eliminamos el texto principal, actualizar referencia
+                    if index == 0 and self.labels:
+                        self.label = self.labels[0]
+                        self.text = self.texts[0]
+                    
+                    print(f"🗑️ Texto eliminado: {removed_text}")
+                    print(f"📊 Total de textos: {len(self.texts)}")
             else:
                 messagebox.showerror("Error", "Número inválido")
         except (ValueError, IndexError):
@@ -536,6 +581,291 @@ class MarcaDeAguaVisible:
         
         messagebox.showinfo("Lista de Textos", message)
     
+    # === SISTEMA DE PERFILES ===
+    
+    def ensure_profiles_directory(self):
+        """Asegurar que existe el directorio de perfiles"""
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
+            print(f"📁 Directorio de perfiles creado: {self.profiles_dir}")
+    
+    def get_current_config(self):
+        """Obtener la configuración actual como diccionario"""
+        # Obtener posiciones de todos los textos
+        text_positions = []
+        for i, label in enumerate(self.labels):
+            if label.winfo_manager() == 'place':
+                # Texto posicionado manualmente
+                info = label.place_info()
+                text_positions.append({
+                    'text': self.texts[i] if i < len(self.texts) else label.cget('text'),
+                    'relx': float(info.get('relx', 0.5)),
+                    'rely': float(info.get('rely', 0.5)),
+                    'anchor': info.get('anchor', 'center')
+                })
+            else:
+                # Texto principal (packed)
+                text_positions.append({
+                    'text': self.texts[i] if i < len(self.texts) else label.cget('text'),
+                    'relx': 0.5,
+                    'rely': 0.5,
+                    'anchor': 'center',
+                    'is_main': True
+                })
+        
+        return {
+            'version': '1.0',
+            'created': datetime.now().isoformat(),
+            'texts': text_positions,
+            'font_size': self.font_size,
+            'text_color': self.text_color,
+            'bg_color': self.bg_color,
+            'border_color': self.border_color,
+            'transparency': self.transparency,
+            'current_transparency_index': self.current_transparency_index,
+            'move_mode': self.move_mode
+        }
+    
+    def apply_config(self, config):
+        """Aplicar una configuración cargada"""
+        try:
+            # Limpiar textos actuales
+            for label in self.labels:
+                label.destroy()
+            self.labels.clear()
+            self.texts.clear()
+            
+            # Aplicar configuraciones básicas
+            self.font_size = config.get('font_size', 64)
+            self.text_color = config.get('text_color', '#FFD700')
+            self.bg_color = config.get('bg_color', '#000080')
+            self.border_color = config.get('border_color', '#FF4500')
+            self.transparency = config.get('transparency', 0.9)
+            self.current_transparency_index = config.get('current_transparency_index', 2)
+            self.move_mode = config.get('move_mode', False)
+            
+            # Recrear textos
+            text_positions = config.get('texts', [])
+            if not text_positions:
+                # Si no hay textos, crear uno vacío
+                self.texts = [""]
+                self.text = ""
+                self.create_text_label("", 0)
+            else:
+                for i, text_config in enumerate(text_positions):
+                    text = text_config.get('text', '')
+                    self.texts.append(text)
+                    
+                    label = self.create_text_label(text, i)
+                    
+                    # Aplicar posición si no es el principal
+                    if not text_config.get('is_main', False) and i > 0:
+                        label.place(
+                            relx=text_config.get('relx', 0.5),
+                            rely=text_config.get('rely', 0.5),
+                            anchor=text_config.get('anchor', 'center')
+                        )
+                
+                # Actualizar referencia del texto principal
+                if self.texts:
+                    self.text = self.texts[0]
+            
+            # Aplicar transparencia
+            self.root.attributes('-alpha', self.transparency)
+            
+            # Actualizar cursor según modo movimiento
+            cursor = 'fleur' if self.move_mode else ''
+            for label in self.labels:
+                label.configure(cursor=cursor)
+            
+            print("✅ Configuración aplicada correctamente")
+            
+        except Exception as e:
+            print(f"❌ Error aplicando configuración: {e}")
+            messagebox.showerror("Error", f"Error aplicando configuración: {e}")
+    
+    def save_profile(self):
+        """Guardar perfil actual"""
+        from tkinter import simpledialog
+        
+        profile_name = simpledialog.askstring(
+            "Guardar Perfil",
+            "Nombre del perfil:",
+            initialvalue=self.current_profile
+        )
+        
+        if profile_name:
+            try:
+                config = self.get_current_config()
+                profile_path = os.path.join(self.profiles_dir, f"{profile_name}.json")
+                
+                with open(profile_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, indent=2, ensure_ascii=False)
+                
+                self.current_profile = profile_name
+                print(f"💾 Perfil guardado: {profile_name}")
+                messagebox.showinfo("Éxito", f"Perfil '{profile_name}' guardado correctamente")
+                
+            except Exception as e:
+                print(f"❌ Error guardando perfil: {e}")
+                messagebox.showerror("Error", f"Error guardando perfil: {e}")
+    
+    def load_profile_dialog(self):
+        """Mostrar diálogo para cargar perfil"""
+        profiles = self.get_available_profiles()
+        if not profiles:
+            messagebox.showinfo("Sin Perfiles", "No hay perfiles disponibles")
+            return
+        
+        from tkinter import simpledialog
+        
+        # Crear lista de perfiles
+        profile_list = "\n".join([f"{i+1}. {profile}" for i, profile in enumerate(profiles)])
+        
+        selection = simpledialog.askstring(
+            "Cargar Perfil",
+            f"Perfiles disponibles:\n{profile_list}\n\nIngresa el nombre del perfil a cargar:"
+        )
+        
+        if selection:
+            if selection in profiles:
+                self.load_profile(selection)
+            else:
+                # Intentar por número
+                try:
+                    index = int(selection) - 1
+                    if 0 <= index < len(profiles):
+                        self.load_profile(profiles[index])
+                    else:
+                        messagebox.showerror("Error", "Selección inválida")
+                except ValueError:
+                    messagebox.showerror("Error", "Perfil no encontrado")
+    
+    def load_profile(self, profile_name=None):
+        """Cargar perfil específico"""
+        if profile_name is None:
+            return
+        
+        try:
+            profile_path = os.path.join(self.profiles_dir, f"{profile_name}.json")
+            
+            if not os.path.exists(profile_path):
+                if profile_name != "default":
+                    print(f"⚠️ Perfil no encontrado: {profile_name}")
+                return
+            
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            self.apply_config(config)
+            self.current_profile = profile_name
+            print(f"📂 Perfil cargado: {profile_name}")
+            
+        except Exception as e:
+            print(f"❌ Error cargando perfil {profile_name}: {e}")
+            if profile_name != "default":
+                messagebox.showerror("Error", f"Error cargando perfil: {e}")
+    
+    def get_available_profiles(self):
+        """Obtener lista de perfiles disponibles"""
+        try:
+            self.ensure_profiles_directory()
+            profiles = []
+            for file in os.listdir(self.profiles_dir):
+                if file.endswith('.json'):
+                    profiles.append(file[:-5])  # Remover .json
+            return sorted(profiles)
+        except Exception as e:
+            print(f"❌ Error obteniendo perfiles: {e}")
+            return []
+    
+    def show_profiles_list(self):
+        """Mostrar lista de perfiles disponibles"""
+        profiles = self.get_available_profiles()
+        
+        if not profiles:
+            messagebox.showinfo("Perfiles", "No hay perfiles guardados")
+            return
+        
+        profiles_info = []
+        for profile in profiles:
+            try:
+                profile_path = os.path.join(self.profiles_dir, f"{profile}.json")
+                with open(profile_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                created = config.get('created', 'Desconocido')
+                texts_count = len(config.get('texts', []))
+                current_marker = " (ACTUAL)" if profile == self.current_profile else ""
+                
+                profiles_info.append(f"📄 {profile}{current_marker}")
+                profiles_info.append(f"   📅 Creado: {created[:10] if created != 'Desconocido' else created}")
+                profiles_info.append(f"   📝 Textos: {texts_count}")
+                profiles_info.append("")
+                
+            except Exception as e:
+                profiles_info.append(f"📄 {profile} (Error: {e})")
+                profiles_info.append("")
+        
+        message = "📋 PERFILES DISPONIBLES:\n\n" + "\n".join(profiles_info)
+        messagebox.showinfo("Lista de Perfiles", message)
+    
+    def delete_profile_dialog(self):
+        """Mostrar diálogo para eliminar perfil"""
+        profiles = self.get_available_profiles()
+        if not profiles:
+            messagebox.showinfo("Sin Perfiles", "No hay perfiles para eliminar")
+            return
+        
+        from tkinter import simpledialog
+        
+        # Crear lista de perfiles
+        profile_list = "\n".join([f"{i+1}. {profile}" for i, profile in enumerate(profiles)])
+        
+        selection = simpledialog.askstring(
+            "Eliminar Perfil",
+            f"Perfiles disponibles:\n{profile_list}\n\nIngresa el nombre del perfil a eliminar:"
+        )
+        
+        if selection:
+            profile_to_delete = None
+            
+            if selection in profiles:
+                profile_to_delete = selection
+            else:
+                # Intentar por número
+                try:
+                    index = int(selection) - 1
+                    if 0 <= index < len(profiles):
+                        profile_to_delete = profiles[index]
+                    else:
+                        messagebox.showerror("Error", "Selección inválida")
+                        return
+                except ValueError:
+                    messagebox.showerror("Error", "Perfil no encontrado")
+                    return
+            
+            # Confirmar eliminación
+            confirm = messagebox.askyesno(
+                "Confirmar Eliminación",
+                f"¿Estás seguro de que quieres eliminar el perfil '{profile_to_delete}'?"
+            )
+            
+            if confirm:
+                try:
+                    profile_path = os.path.join(self.profiles_dir, f"{profile_to_delete}.json")
+                    os.remove(profile_path)
+                    print(f"🗑️ Perfil eliminado: {profile_to_delete}")
+                    messagebox.showinfo("Éxito", f"Perfil '{profile_to_delete}' eliminado correctamente")
+                    
+                    # Si era el perfil actual, resetear
+                    if profile_to_delete == self.current_profile:
+                        self.current_profile = "default"
+                        
+                except Exception as e:
+                    print(f"❌ Error eliminando perfil: {e}")
+                    messagebox.showerror("Error", f"Error eliminando perfil: {e}")
+    
     def reset_settings(self):
         """Resetear todas las configuraciones"""
         # Limpiar textos adicionales
@@ -546,11 +876,13 @@ class MarcaDeAguaVisible:
         self.labels = self.labels[:1]  # Mantener solo el principal
         self.texts = [self.texts[0]]   # Mantener solo el texto principal
         
-        # Resetear configuraciones
-        self.text = "🌟 TONY ERES MAS FEO QUE PEGARLE A UN PADRE  🌟"
+        # Resetear configuraciones a valores por defecto
+        self.text = ""  # Texto vacío por defecto ahora
         self.texts[0] = self.text
         self.font_size = 64
         self.text_color = "#FFD700"
+        self.bg_color = "#000080"
+        self.border_color = "#FF4500"
         self.transparency = 0.9
         self.current_transparency_index = 2
         self.move_mode = False
@@ -564,12 +896,22 @@ class MarcaDeAguaVisible:
         )
         self.root.attributes('-alpha', self.transparency)
         
+        # Guardar como perfil por defecto
+        try:
+            config = self.get_current_config()
+            profile_path = os.path.join(self.profiles_dir, "default.json")
+            with open(profile_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            print("💾 Configuración por defecto guardada")
+        except Exception as e:
+            print(f"⚠️ Error guardando configuración por defecto: {e}")
+        
         # Cerrar menú si está abierto
         if self.menu_open:
             self.toggle_menu()
         
         print("🔄 Configuraciones reseteadas")
-        print("📊 Textos limpiados - Solo queda el texto principal")
+        print("📊 Textos limpiados - Texto vacío establecido")
     
     def quit_app(self):
         """Cerrar la aplicación"""
@@ -596,9 +938,13 @@ class MarcaDeAguaVisible:
                 "• 🎯 Modo Mover: Mueve textos individualmente\n" +
                 "• ➕ Añadir textos múltiples y separados\n" +
                 "• 📝 Doble clic para editar textos\n" +
-                "• 📋 Ver lista completa de textos\n\n" +
+                "• �️ Eliminar cualquier texto (incluso el principal)\n" +
+                "• 💾 Sistema de perfiles: Guarda y carga configuraciones\n" +
+                "• 📋 Gestión completa de perfiles\n\n" +
+                "💡 TIPS:\n" +
                 "• Usa los botones para controlarla\n" +
-                "• Arrastra la ventana para moverla\n" +
+                "• Arrastra la ventana desde el menú o área de arrastre\n" +
+                "• Guarda tus configuraciones favoritas como perfiles\n" +
                 "• Siempre está encima de otras ventanas"
             ))
             
